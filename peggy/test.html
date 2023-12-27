@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Editor</title>
+    <style>
+        #editorWrapper {
+            display: flex;
+            justify-content: center;
+            align-items: start;
+            height: 100vh;
+        }
+        #editor, #output {
+            width: 500px; 
+            height: 200px;
+        }
+        #output {
+            margin-left: 20px;
+            overflow-y: auto;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+        .buttonWrapper {
+            text-align: center; 
+            margin-top: -250px;
+        }
+        .ace_custom .ace_source { color: blue; }
+        .ace_custom .ace_action-read { color: green; }
+        .ace_custom .ace_action-update { color: red; }
+        .ace_custom .ace_action-delete { color: red; }
+        .ace_custom .ace_action-create { color: brown; }
+        .ace_custom .ace_allowance-allowed { color: green; }
+        .ace_custom .ace_allowance { color: red; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ext-language_tools.js"></script>
+    <script src=".\peg-0.10.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <div style="text-align:center;">
+        <select id="themeSelector">
+            <option value="ace/theme/monokai">Monokai</option>
+            <option value="ace/theme/github">GitHub</option>
+            <option value="ace/theme/twilight">Twilight</option>
+            <option value="ace/theme/solarized_light">Solarized Light</option>
+            <option value="ace/theme/solarized_dark">Solarized Dark</option>
+        </select>
+    </div>
+    <div id="editorWrapper">
+        <div id="editor"></div>
+        <div id="output"></div>
+    </div>
+    <div class="buttonWrapper">
+        <button id="parseButton">Compile</button>
+    </div>
+
+    <script>
+    const apiData = {
+        sources: ["orders", "users", "kyc"],
+        actions: ["read", "update", "delete", "create"],
+        allowances: ["allowed", "not allowed", "require otp", "ask permission", "partial allowed"]
+    };
+    var customCompleter = {
+            getCompletions: function(editor, session, pos, prefix, callback) {
+
+                const words = [...apiData.sources, ...apiData.actions, ...apiData.allowances];
+                const completions = words.map(word => ({
+                    caption: word,
+                    value: word,
+                    meta: "custom"
+                }));
+                callback(null, completions);
+            }
+        };
+
+        var editor = ace.edit("editor");
+        editor.setTheme("ace/theme/monokai");
+
+       // Custom Highlight Rules
+       var CustomHighlightRules = ace.require("ace/mode/text_highlight_rules").TextHighlightRules;
+        var MyCustomHighlightRules = function() {
+            this.$rules = {
+                "start" : [
+                    { token: "ace_source", regex: "\\b(?:orders|users|kyc)\\b" },
+                    { token: "ace_action-read", regex: "\\bread\\b" },
+                    { token: "ace_action-update", regex: "\\bupdate\\b" },
+                    { token: "ace_action-delete", regex: "\\bdelete\\b" },
+                    { token: "ace_action-create", regex: "\\bcreate\\b" },
+                    { token: "ace_allowance-allowed", regex: "\\ballowed\\b" },
+                    { token: "ace_allowance", regex: "\\b(?:not allowed|require otp|ask permission|partial allowed)\\b" }
+                 ]
+            };
+            this.normalizeRules();
+        };
+
+         MyCustomHighlightRules.prototype = Object.create(CustomHighlightRules.prototype);
+        MyCustomHighlightRules.prototype.constructor = MyCustomHighlightRules;
+
+         var CustomMode = function() {
+            this.HighlightRules = MyCustomHighlightRules;
+        };
+        var TextMode = ace.require("ace/mode/text").Mode;
+        CustomMode.prototype = Object.create(TextMode.prototype);
+        CustomMode.prototype.constructor = CustomMode;
+
+         editor.session.setMode(new CustomMode());
+
+        // editor.session.setMode("ace/mode/golang");
+        //editor.session.setMode("ace/mode/text");
+        
+        editor.setOptions({
+            enableBasicAutocompletion: true,
+            enableLiveAutocompletion: true,
+        });
+        editor.completers = [customCompleter];
+
+        document.getElementById('themeSelector').addEventListener('change', function() {
+            editor.setTheme(this.value);
+        });
+
+        function generateParser(grammar) {
+            try {
+                return peg.generate(grammar);
+            } catch (error) {
+                console.error("Error generating parser:", error);
+                return null;
+            }
+        }
+
+        document.getElementById("parseButton").onclick = function() {
+            var input = editor.getValue();
+            var grammar = `
+                start = policies:statement+ { return policies; }
+                statement = source:source " " action:action " " allowance:allowance "\\n"? { return { source, action, allowance }; }
+                source = "${apiData.sources.join('" / "')}"
+                action = "${apiData.actions.join('" / "')}"
+                allowance = "${apiData.allowances.join('" / "')}"
+            `;
+            var parser = generateParser(grammar);
+
+            if (parser) {
+                try {
+                    var result = parser.parse(input);
+                    document.getElementById("output").innerText = JSON.stringify(result, null, 2);
+                    console.log(result);
+
+                    // Post result to localhost/dsl
+                    // axios.post('http://localhost/dsl', result)
+                    //     .then(response => console.log('Post Success:', response))
+                    //     .catch(error => console.error('Post Error:', error));
+                } catch (parseError) {
+                    console.error("Parse Error:", parseError);
+                    document.getElementById("output").innerText = "Parse Error: " + parseError.message;
+                }
+            } else {
+                document.getElementById("output").innerText = "Invalid Grammar";
+            }
+        };
+    </script>
+</body>
+</html>

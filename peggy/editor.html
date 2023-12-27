@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Editor</title>
+    <style>
+        #editorWrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ext-language_tools.js"></script>
+    <script src=".\peg-0.10.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <div id="editorWrapper">
+        <div id="editor" style="width: 500px; height: 200px"></div>
+    </div>
+    <button id="parseButton">Parse</button>
+    <div id="output"></div>
+
+    <script>
+        // Mock API response
+        const apiData = {
+            sources: ["orders", "users", "kyc"],
+            actions: ["read", "update", "delete", "create"],
+            allowances: ["allowed", "not allowed", "require otp", "ask permission", "partial allowed"]
+        };
+
+        var customCompleter = {
+            getCompletions: function(editor, session, pos, prefix, callback) {
+                const words = [...apiData.sources, ...apiData.actions, ...apiData.allowances];
+                const completions = words.map(word => ({
+                    caption: word,
+                    value: word,
+                    meta: "custom"
+                }));
+                callback(null, completions);
+            }
+        };
+
+        var editor = ace.edit("editor");
+        editor.setTheme("ace/theme/monokai");
+        editor.session.setMode("ace/mode/text");
+        editor.setOptions({
+            enableBasicAutocompletion: true,
+            enableLiveAutocompletion: true
+        });
+        editor.completers = [customCompleter];
+
+        function generateParser(grammar) {
+            try {
+                return peg.generate(grammar);
+            } catch (error) {
+                console.error("Error generating parser:", error);
+                return null;
+            }
+        }
+
+        document.getElementById("parseButton").onclick = function() {
+            var input = editor.getValue();
+            var grammar = `
+                start = policies:statement+ { return policies; }
+                statement = source:source " " action:action " " allowance:allowance "\\n"? { return { source, action, allowance }; }
+                source = "${apiData.sources.join('" / "')}"
+                action = "${apiData.actions.join('" / "')}"
+                allowance = "${apiData.allowances.join('" / "')}"
+            `;
+            var parser = generateParser(grammar);
+
+            if (parser) {
+                try {
+                    var result = parser.parse(input);
+                    document.getElementById("output").innerText = JSON.stringify(result, null, 2);
+
+                    // Post result to localhost/dsl
+                    axios.post('http://localhost/dsl', result)
+                        .then(response => console.log('Post Success:', response))
+                        .catch(error => console.error('Post Error:', error));
+
+                } catch (parseError) {
+                    console.error("Parse Error:", parseError);
+                    document.getElementById("output").innerText = "Parse Error: " + parseError.message;
+                }
+            } else {
+                document.getElementById("output").innerText = "Invalid Grammar";
+            }
+        };
+    </script>
+</body>
+</html>
